@@ -228,6 +228,10 @@ class TelephonySession:
                 end_silence_ms = self.detector.last_end_silence_ms
                 utterance = bytes(self._utterance_buffer)
                 self._utterance_buffer.clear()
+                logger.info(
+                    "telephony bridge[%s]: utterance ended (%.0fms audio, %dms trailing silence, %s)",
+                    self._session_id, len(utterance) / 2 / self.sample_rate * 1000, end_silence_ms, self.detector.last_end_mode,
+                )
                 if self._active_task and not self._active_task.done():
                     self._active_task.cancel()
                 self._active_task = asyncio.create_task(self._run_turn_guarded(utterance, end_silence_ms, send_json, send_bytes))
@@ -264,8 +268,10 @@ class TelephonySession:
     async def _run_turn(self, pcm: bytes, end_silence_ms: int, send_json, send_bytes) -> None:
         self._turn_seq += 1
         turn_started = time.monotonic()
+        logger.info("telephony bridge[%s]: turn %d starting STT (%.0fms audio)", self._session_id, self._turn_seq, len(pcm) / 2 / self.sample_rate * 1000)
         stt_pcm = _trim_trailing_silence(pcm, self.sample_rate, end_silence_ms) if end_silence_ms else pcm
         transcript = await run_on_model_thread(self.voice.transcribe_pcm, stt_pcm, self.sample_rate, self.language, gpu=_stt_uses_gpu())
+        logger.info("telephony bridge[%s]: STT done at +%dms", self._session_id, int((time.monotonic() - turn_started) * 1000))
         question = str(transcript["text"]).strip()
         if not question:
             return
@@ -273,8 +279,9 @@ class TelephonySession:
         duration_ms = len(stt_pcm) / 2 / self.sample_rate * 1000
         if transcript_looks_garbled(question) or transcript.get("low_confidence") or speech_rate_implausible(question, duration_ms):
             reply_code = self.language if self.language != "auto" else (self._established_language or "en")
-            logger.info("telephony bridge[%s]: transcript looks garbled/implausible -- asking to repeat (in %r)", self._session_id, reply_code)
+            logger.info("telephony bridge[%s]: transcript looks garbled/implausible (%r) -- asking to repeat (in %r)", self._session_id, question, reply_code)
             await self._ask_to_repeat(reply_code, send_json, send_bytes)
+            logger.info("telephony bridge[%s]: ask-to-repeat done at +%dms", self._session_id, int((time.monotonic() - turn_started) * 1000))
             return
 
         detected_language = transcript.get("language")
@@ -428,6 +435,7 @@ class TelephonySession:
         return output
 
     async def _synthesize_and_send(self, text: str, target_code: str, seq: int, send_bytes) -> None:
+        started = time.monotonic()
         try:
             speech = await run_on_model_thread(self.voice.synthesize, SpeechRequest(text, self.voice_name, target_code), gpu=_tts_uses_gpu())
         except ProviderUnavailable:
@@ -436,6 +444,10 @@ class TelephonySession:
         wav_bytes = base64.b64decode(speech["audioBase64"])
         pcm, native_rate = _wav_bytes_to_pcm(wav_bytes)
         pcm_out = resample_pcm16(pcm, native_rate, settings.telephony_output_sample_rate)
+        logger.info(
+            "telephony bridge[%s]: TTS seq=%d done in %dms (%r, %d bytes out)",
+            self._session_id, seq, int((time.monotonic() - started) * 1000), text[:60], len(pcm_out),
+        )
         await send_bytes(pcm_out)
 
     async def _invoke_tool(self, call: dict, send_json) -> dict:
