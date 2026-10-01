@@ -602,6 +602,51 @@ def _looks_like_english(text: str) -> bool:
     return (latin_count / len(letters)) > 0.6
 
 
+def _script_violation(text: str, expected_code: str) -> bool:
+    """True if `text` contains a meaningful amount of script OTHER than Latin and
+    `expected_code`'s own script -- e.g. a Telugu reply that drifts into Kannada or
+    Malayalam characters.
+
+    Found live, reproduced deterministically: asked "speak in telugu" (plain
+    English, about Telugu, not written in it -- target_code correctly stays "en"
+    per _ROMANIZED_MARKERS' own deliberate exclusion of language names), the LLM
+    sometimes ignores its own "answer only in English" instruction and writes
+    Telugu-script text directly, which then drifts further into visually/
+    structurally adjacent scripts it apparently confuses with Telugu -- Unicode
+    gives Telugu (0C00-0C7F), Kannada (0C80-0CFF) and Malayalam (0D00-0D7F)
+    parallel internal layouts, which is exactly the kind of near-miss a model
+    weak on a low-resource script can make. Because target_code=="en" means
+    needs_translation is False, NOTHING downstream ever validates this output --
+    it reaches the caller completely raw. Worse, once one such reply lands in the
+    conversation history, the LLM was observed conditioning on its own broken
+    prior turn and producing progressively more corrupted replies in later
+    turns -- so this check exists specifically to stop that before it starts,
+    not just to tidy up one bad sentence."""
+    expected_range = next((rng for start, end, code in _SCRIPT_RANGES if code == expected_code for rng in ((start, end),)), None)
+    for character in text:
+        if not character.isalpha():
+            continue
+        code_point = ord(character)
+        if code_point < 0x0250:  # Latin (incl. accented) -- always allowed (names, numbers, loanwords)
+            continue
+        if expected_range and expected_range[0] <= code_point <= expected_range[1]:
+            continue
+        return True
+    return False
+
+
+# Pre-written, never-generated fallback for when _script_violation fires and a turn
+# ends up with nothing safe to say -- deliberately NOT another LLM call (that would
+# risk repeating the exact failure this guards against) or a translation call (one
+# more moving part that could itself fail); a fixed phrase is the one response
+# guaranteed not to be broken.
+_GENERATION_FALLBACK: dict[str, str] = {
+    "en": "Sorry, I'm having trouble answering that right now. Could you ask again?",
+    "hi": "माफ़ कीजिए, अभी इसका जवाब देने में समस्या हो रही है। क्या आप दोबारा पूछ सकते हैं?",
+    "te": "క్షమించండి, దీనికి సమాధానం ఇవ్వడంలో సమస్య ఉంది. మళ్ళీ అడగగలరా?",
+}
+
+
 class ProviderUnavailable(RuntimeError):
     """Raised when a configured local AI provider cannot be reached."""
 
@@ -820,12 +865,34 @@ class VoiceService:
         # (generation vs. translation/rewrite) instead of guessed at.
         prep_ms = int((time.monotonic() - started) * 1000)
 
-        def emit(raw_sentence: str) -> dict[str, object]:
+        had_any_generation = False
+        had_violation = False
+
+        def emit(raw_sentence: str) -> dict[str, object] | None:
             nonlocal output_text
             generated_ms = int((time.monotonic() - started) * 1000)
             localize_started = time.monotonic()
             should_translate = needs_translation and _looks_like_english(raw_sentence)
             output = self._localize_sentence(raw_sentence, target_code, is_code_mixed) if should_translate else raw_sentence
+            # Catches the LLM ignoring its own language instruction (generation_code=="en"
+            # but it wrote non-Latin script) just as much as a direct-language generation
+            # drifting into an adjacent script (e.g. Telugu into Kannada) -- see
+            # _script_violation's docstring for the real, reproduced incident this guards.
+            # Checked on `output` (what actually gets shown/spoken), not `raw_sentence`,
+            # so a bad translation/rewrite is caught too, not just bad raw generation.
+            # expected script: target_code whenever translation is in play at all (even
+            # if this specific piece skipped it because the LLM already wrote non-English
+            # -- it should still match target_code, not just any non-Latin script);
+            # otherwise whatever the LLM was actually told to generate in.
+            expected_script = target_code if needs_translation else generation_code
+            if _script_violation(output, expected_script):
+                nonlocal had_violation
+                had_violation = True
+                logger.warning(
+                    "stream_answer: dropping a reply piece with unexpected script (expected %r): %r",
+                    expected_script, output,
+                )
+                return None
             output_text = f"{output_text} {output}".strip()
             return {
                 "sentence": output,
@@ -843,7 +910,10 @@ class VoiceService:
                 for piece in ready:
                     piece = _EMOJI_PATTERN.sub("", piece).strip()
                     if piece:
-                        yield emit(piece)
+                        had_any_generation = True
+                        emitted = emit(piece)
+                        if emitted is not None:
+                            yield emitted
                 if chunk.get("done"):
                     break
         except ProviderUnavailable as error:
@@ -852,7 +922,20 @@ class VoiceService:
 
         remainder = _EMOJI_PATTERN.sub("", assistant_text[spoken_length:]).strip()
         for piece in _clauses(remainder) if remainder else []:
-            yield emit(piece)
+            had_any_generation = True
+            emitted = emit(piece)
+            if emitted is not None:
+                yield emitted
+
+        if had_violation and not output_text.strip() and had_any_generation:
+            # Every piece this turn was flagged -- rather than send nothing (dead air)
+            # or a partially-corrupted reply, say so honestly in a fixed, never-wrong
+            # phrase. See _GENERATION_FALLBACK's docstring for why this is a fixed
+            # phrase and not another generation/translation call.
+            fallback = _GENERATION_FALLBACK.get(target_code, _GENERATION_FALLBACK["en"])
+            output_text = fallback
+            yield {"sentence": fallback, "timing": {"prep_ms": prep_ms, "generated_ms": 0, "localize_ms": 0}}
+
         # full_text is what was actually shown/spoken (translated, if this turn needed
         # translation) -- NOT the LLM's raw English generation, so a stored transcript
         # or conversation-history entry never silently reverts to English underneath it.
