@@ -1,0 +1,67 @@
+aiofiles==25.1.0
+aiohappyeyeballs==2.7.1
+aiohttp==3.14.3
+aiosignal==1.4.0
+annotated-doc==0.0.5
+annotated-types==0.8.0
+anyio==4.15.1
+attrs==26.1.0
+click==8.5.0
+fastapi==0.141.1
+frozenlist==1.8.0
+h11==0.16.0
+idna==3.20
+multidict==6.9.1
+numpy==2.4.6
+packaging==26.3
+propcache==0.5.4
+pydantic==2.13.5
+pydantic-settings>=2.11,<3
+pydantic_core==2.46.5
+python-multipart>=0.0.20,<1.0.0
+pypdf>=5.0.0,<6.0.0
+python-docx>=1.1.0,<2.0.0
+sqlalchemy>=2.0,<3
+starlette==1.6.0
+typing-inspection==0.4.4
+typing_extensions==4.16.0
+uvicorn==0.53.0
+yarl==1.25.1
+faster-whisper>=1.1,<2
+piper-tts>=1.2,<2
+coqui-tts>=0.27,<0.28
+
+# Semantic document search: ONNX Runtime + the standalone tokenizers library,
+# NOT sentence-transformers. sentence-transformers (and even a bare `transformers`
+# import) pulls in scikit-learn's compiled extensions as a side effect, which some
+# locked-down Windows setups (Application Control / WDAC policies) block outright.
+# This path downloads the same model's onnx/model.onnx + tokenizer.json directly
+# and runs them without ever importing sklearn.
+onnxruntime>=1.19,<2
+huggingface_hub>=0.24,<2
+tokenizers>=0.19,<1
+
+# Indic-language translation (services/translation.py, indic_processor.py): the LLM
+# writes replies in English, and this local IndicTrans2 ONNX model translates them
+# into Hindi/Telugu/Tamil/etc. -- verified far more reliable than asking the LLM to
+# write those scripts directly. `IndicTransToolkit` (the upstream helper package) only
+# ships as a Cython source distribution with no prebuilt wheel, so indic_processor.py
+# is a pure-Python reimplementation of its IndicProcessor class instead -- these three
+# are its only real dependencies, no compiler needed.
+indic-nlp-library
+sacremoses
+regex
+
+# Full ISO 639 language name database (pure data, no compiled/ML dependencies) -- used
+# so a language Whisper detects outside the curated dropdown list (SUPPORTED_LANGUAGES
+# in config.py, ~28 languages) still gets a real name like "Swahili" in the LLM's
+# instruction instead of a bare, confusing code like "sw".
+pycountry
+
+# TTS voice cloning (coqui-tts) needs PyTorch, which isn't pulled in automatically
+# on every platform. Install separately if requirements.txt doesn't already have it:
+#   pip install torch --index-url https://download.pytorch.org/whl/cu130   # NVIDIA GPU build (match your CUDA version)
+#   pip install torch                                                      # CPU-only fallback
+
+# Not used by any code yet — reintroduce when the Plivo telephony phase starts:
+# livekit, livekit-api, livekit-protocol, redis, PyJWT, types-protobuf

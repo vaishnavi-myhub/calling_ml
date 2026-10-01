@@ -1,0 +1,2 @@
+import { createFileRoute } from "@tanstack/react-router"; import { AgentsPage } from "@/components/voice/product-pages";
+export const Route=createFileRoute("/agents")({head:()=>({meta:[{title:"AI Agents — AI Voice Calling"},{name:"description",content:"Configure multilingual local AI voice agents and models."},{property:"og:title",content:"AI Voice Agents"},{property:"og:description",content:"Manage multilingual voice agents and performance."},{property:"og:type",content:"website"},{name:"twitter:card",content:"summary_large_image"}]}),component:AgentsPage});

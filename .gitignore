@@ -1,0 +1,40 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+backend/.venv/
+backend/.venv311/
+
+# Local secrets/config -- never committed
+.env
+backend/.env
+backend/.env.prod
+frontend/.env
+
+# Runtime data: model weights (downloaded separately, multi-GB -- a single
+# Qwen3-8B shard alone is ~4GB, far past GitHub's 100MB per-file limit), the
+# SQLite DB, and diagnostic audio dumps -- all regenerated/reproducible, not
+# source.
+backend/data/models/
+backend/models/
+backend/data/*.db
+backend/data/debug_audio/
+
+# Claude Code session state -- local to this machine, not project source.
+.claude/
+
+# Frontend (frontend/.gitignore already covers node_modules/.output/.wrangler
+# for anything run from inside frontend/; these catch the same paths if a
+# tool is ever run from the repo root instead).
+frontend/node_modules/
+frontend/dist/
+frontend/dist-ssr/
+frontend/.output/
+frontend/.wrangler/
+frontend/.vinxi/
+frontend/.nitro/
+
+# OS/editor
+.DS_Store
+*.swp

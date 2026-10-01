@@ -1,0 +1,2 @@
+import { createFileRoute } from "@tanstack/react-router"; import { CampaignsPage } from "@/components/voice/product-pages";
+export const Route=createFileRoute("/campaigns")({head:()=>({meta:[{title:"Campaigns — AI Voice Calling"},{name:"description",content:"Launch and measure outbound AI calling campaigns."},{property:"og:title",content:"AI Calling Campaigns"},{property:"og:description",content:"Manage campaign progress, performance, and conversion."},{property:"og:type",content:"website"},{name:"twitter:card",content:"summary_large_image"}]}),component:CampaignsPage});

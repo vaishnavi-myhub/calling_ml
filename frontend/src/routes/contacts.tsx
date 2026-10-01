@@ -1,0 +1,2 @@
+import { createFileRoute } from "@tanstack/react-router"; import { ContactsPage } from "@/components/voice/product-pages";
+export const Route=createFileRoute("/contacts")({head:()=>({meta:[{title:"Contacts & Leads — AI Voice Calling"},{name:"description",content:"Manage contacts, lead status, sentiment, and follow-ups."},{property:"og:title",content:"Contacts and Leads"},{property:"og:description",content:"CRM intelligence for AI voice operations."},{property:"og:type",content:"website"},{name:"twitter:card",content:"summary_large_image"}]}),component:ContactsPage});
